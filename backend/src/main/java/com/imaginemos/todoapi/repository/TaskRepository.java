@@ -17,7 +17,16 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     Page<Task> findByStatus(TaskStatus status, Pageable pageable);
 
-    List<Task> findByStatusIn(List<TaskStatus> statuses);
+    @Query("""
+           SELECT COUNT(t) FROM Task t
+           WHERE t.status = :status
+             AND t.executionDate IS NOT NULL
+             AND t.executionDate < :now
+           """)
+    long countOverdue(@Param("status") TaskStatus status,
+                      @Param("now") LocalDateTime now);
+
+    Page<Task> findByStatusIn(List<TaskStatus> statuses, Pageable pageable);
 
     @Query("""
            SELECT t FROM Task t
@@ -25,13 +34,20 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
              AND t.executionDate IS NOT NULL
              AND t.executionDate < :now
            """)
-    List<Task> findOverdue(@Param("status") TaskStatus status,
-                           @Param("now") LocalDateTime now);
+    Page<Task> findOverdue(@Param("status") TaskStatus status,
+                           @Param("now") LocalDateTime now,
+                           Pageable pageable);
 
     @Query("""
-           SELECT t FROM Task t
-           WHERE LOWER(t.title) LIKE LOWER(CONCAT('%', :query, '%'))
-              OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :query, '%'))
+           SELECT DISTINCT t FROM Task t LEFT JOIN t.items i
+           WHERE (:status IS NULL OR t.status = :status)
+             AND (
+                  LOWER(t.title) LIKE LOWER(CONCAT('%', :query, '%'))
+               OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :query, '%'))
+               OR LOWER(COALESCE(i.description, '')) LIKE LOWER(CONCAT('%', :query, '%'))
+             )
            """)
-    Page<Task> search(@Param("query") String query, Pageable pageable);
+    Page<Task> search(@Param("query") String query,
+                      @Param("status") TaskStatus status,
+                      Pageable pageable);
 }

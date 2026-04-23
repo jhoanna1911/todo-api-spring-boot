@@ -1,920 +1,490 @@
 # Registro de Decisiones Técnicas
 
-> **Propósito**: Documentar las decisiones arquitectónicas y técnicas importantes tomadas durante el desarrollo, las alternativas consideradas, y el rol de la IA en cada decisión.
+> Log de decisiones arquitectónicas y de diseño tomadas durante el desarrollo de la TODO API.
+> Cada decisión incluye contexto, alternativas evaluadas, opción elegida, justificación y rol de la IA en el razonamiento.
 
 ---
 
-## Formato de Decisión
+## Índice
 
-Cada decisión se documenta usando el siguiente formato:
-
-```markdown
-## Decisión #N: [Título de la decisión]
-
-**Fecha**: YYYY-MM-DD
-**Estado**: [Propuesta / Aceptada / Rechazada / Obsoleta]
-**Contexto**: 
-Descripción del problema o situación que requería una decisión.
-
-**Alternativas consideradas**:
-1. **Opción A**: Descripción
-   - Pros: ...
-   - Contras: ...
-
-2. **Opción B**: Descripción
-   - Pros: ...
-   - Contras: ...
-
-3. **Opción C**: Descripción
-   - Pros: ...
-   - Contras: ...
-
-**Decisión tomada**: [Opción elegida]
-
-**Justificación**:
-Explicación detallada de por qué se eligió esta opción.
-
-**Rol de la IA**:
-- ¿Consulté a IA sobre esto? [Sí/No]
-- ¿Qué recomendó la IA?
-- ¿Seguí la recomendación? [Total/Parcial/No]
-- ¿Por qué seguí o no la recomendación?
-
-**Consecuencias**:
-- **Positivas**: ...
-- **Negativas**: ...
-- **Riesgos**: ...
-
-**Archivos afectados**:
-- Lista de archivos impactados por esta decisión
-
-**Revisión futura**:
-- ¿Cuándo revisar esta decisión?
-- ¿Bajo qué condiciones reconsiderarla?
+1. [Base de datos en memoria para desarrollo (H2)](#1-base-de-datos-en-memoria-para-desarrollo-h2)
+2. [Arquitectura en capas clásica](#2-arquitectura-en-capas-clásica)
+3. [DTOs separados para request / response + `records`](#3-dtos-separados-para-request--response--records)
+4. [Relación `Task ↔ TaskItem` bidireccional con `CascadeType.ALL` + `orphanRemoval`](#4-relación-task--taskitem-bidireccional-con-cascadetypeall--orphanremoval)
+5. [Máquina de estados sin librería: mapa inmutable en el servicio](#5-máquina-de-estados-sin-librería-mapa-inmutable-en-el-servicio)
+6. [Validación dual: `@Valid` en DTOs + reglas de negocio en servicio](#6-validación-dual-valid-en-dtos--reglas-de-negocio-en-servicio)
+7. [`@ControllerAdvice` global con `ErrorResponse` consistente](#7-controlleradvice-global-con-errorresponse-consistente)
+8. [Búsqueda con JPQL `LEFT JOIN` sobre ítems](#8-búsqueda-con-jpql-left-join-sobre-ítems)
+9. [Paginación universal + tope `max-page-size`](#9-paginación-universal--tope-max-page-size)
+10. [Alerta de tareas overdue: headers HTTP + flag + endpoint](#10-alerta-de-tareas-overdue-headers-http--flag--endpoint)
+11. [Idioma único del código: inglés](#11-idioma-único-del-código-inglés)
+12. [Upgrade de springdoc-openapi por incompatibilidad con Spring Boot 3.5](#12-upgrade-de-springdoc-openapi-por-incompatibilidad-con-spring-boot-35)
+13. [Seed reproducible para el evaluador](#13-seed-reproducible-para-el-evaluador)
+14. [Docker opcional pero incluido](#14-docker-opcional-pero-incluido)
 
 ---
+
+## 1. Base de datos en memoria para desarrollo (H2)
+
+**Contexto:** el enunciado no obliga a una BD específica; solo persistencia.
+
+**Alternativas:**
+- H2 en memoria → setup cero
+- PostgreSQL local → requiere instalación
+- MySQL local → requiere instalación
+
+**Decisión:** H2 en memoria (`jdbc:h2:mem:tododb`) con consola web habilitada en `/api/h2-console`.
+
+**Justificación:**
+- El evaluador clona y corre con `./mvnw spring-boot:run` sin instalar nada.
+- La console H2 ayuda a inspeccionar datos durante la revisión.
+- Spring Boot permite migrar a Postgres cambiando solo `application.yml` + dependencia, sin tocar código.
+
+**Rol de IA:** recomendación estándar (Sí → seguida).
+
+**Consecuencias:** los datos se pierden al reiniciar; por eso se entrega `docs/seed.sh` para repoblar rápidamente (ver decisión 13).
+
+**Archivos:** `application.yml`, `pom.xml`.
+
+---
+
+## 2. Arquitectura en capas clásica
+
+**Contexto:** definir el estilo arquitectónico.
+
+**Alternativas:**
+- Capas tradicional (Controller → Service → Repository → Entity) con DTOs y Mappers.
+- Clean/Hexagonal Architecture.
+- Controller con lógica directa.
+
+**Decisión:** capas tradicional.
+
+**Justificación:**
+- Alcance pequeño/mediano — hexagonal sería sobre-ingeniería.
+- Es lo que espera ver un evaluador técnico en Spring Boot.
+- Cada capa se testea independientemente (ver decisión 6 y suite de tests).
+
+**Estructura final:**
+```
+com.imaginemos.todoapi/
+├── config/           # OpenAPI, WebMvc, Interceptor
+├── controller/       # TaskController
+├── dto/
+│   ├── request/
+│   └── response/
+├── entity/
+├── exception/
+├── mapper/
+├── repository/
+└── service/
+    └── impl/
 ```
 
----
+**Rol de IA:** recomendación (Sí → seguida).
 
-## Índice de Decisiones
-
-1. [Base de datos para desarrollo](#decisión-1-base-de-datos-para-desarrollo)
-2. [Arquitectura de capas](#decisión-2-arquitectura-de-capas)
-3. [Estrategia de DTOs](#decisión-3-estrategia-de-dtos)
-4. [Manejo de relaciones JPA](#decisión-4-manejo-de-relaciones-jpa)
-5. [Estrategia de validación](#decisión-5-estrategia-de-validación)
-6. [Gestión de estados de tareas](#decisión-6-gestión-de-estados-de-tareas)
-7. [Paginación y búsqueda](#decisión-7-paginación-y-búsqueda)
-8. [Manejo de excepciones](#decisión-8-manejo-de-excepciones)
-9. [Estrategia de testing](#decisión-9-estrategia-de-testing)
-10. [Despliegue y contenerización](#decisión-10-despliegue-y-contenerización)
+**Archivos:** estructura completa del proyecto.
 
 ---
 
-## Decisión #1: Base de datos para desarrollo
+## 3. DTOs separados para request / response + `records`
 
-**Fecha**: 2024-04-20
-**Estado**: Aceptada
+**Contexto:** contratos de API vs. modelo de dominio.
 
-**Contexto**: 
-Necesitaba elegir la base de datos para el entorno de desarrollo. La prueba técnica no especifica qué base de datos usar, solo requiere persistencia de datos.
+**Alternativas:**
+- DTOs separados Request + Response → best practice.
+- Exponer entidades directamente → anti-patrón (lazy loading, acoplamiento a BD).
+- Un DTO único → mezcla responsabilidades.
 
-**Alternativas consideradas**:
+**Decisión:** DTOs separados. `TaskResponse` y `PagedResponse<T>` son `records` inmutables.
 
-1. **H2 Database (in-memory)**
-   - Pros: 
-     - No requiere instalación
-     - Rápida para desarrollo
-     - Fácil de resetear
-     - Console web integrada
-     - Perfecta para demos
-   - Contras:
-     - No es para producción
-     - Datos se pierden al reiniciar
-     - Algunas diferencias con PostgreSQL
+**Justificación:**
+- Responses inmutables reducen bugs por mutación accidental.
+- Validaciones específicas por operación (crear exige título; editar puede venir parcial).
+- Campos computados (`isOverdue`, `itemsCompletedCount`, `itemsTotalCount`) se calculan en el mapper, no se persisten.
+- Evolución independiente del esquema de BD.
 
-2. **PostgreSQL local**
-   - Pros:
-     - Producción-ready
-     - Muy completo
-     - Gran comunidad
-   - Contras:
-     - Requiere instalación
-     - Más complejo para setup inicial
-     - Puede complicar evaluación
+**Rol de IA:** recomendación fuerte (Sí → seguida).
 
-3. **MySQL local**
-   - Pros:
-     - Popular
-     - Bien documentado
-   - Contras:
-     - Requiere instalación
-     - Similar complejidad a PostgreSQL
-
-**Decisión tomada**: H2 Database (in-memory)
-
-**Justificación**:
-- Prioridad es facilitar la evaluación del proyecto
-- El evaluador puede clonar y ejecutar sin instalar nada
-- Es apropiado para el alcance de la prueba técnica
-- Podemos configurar perfil de producción con PostgreSQL más adelante si es necesario
-- Spring Boot hace trivial el cambio a otra DB
-
-**Rol de la IA**:
-- ✅ Consulté a IA sobre esto
-- IA recomendó H2 para desarrollo y PostgreSQL para producción
-- ✅ Seguí la recomendación total
-- Es la práctica estándar y simplifica el setup
-
-**Consecuencias**:
-- **Positivas**: 
-  - Setup instantáneo
-  - Console H2 útil para debugging
-  - Evaluador puede probar sin configuración
-- **Negativas**: 
-  - Datos no persisten entre reinicios
-  - Pequeñas diferencias de SQL si migramos a producción
-- **Riesgos**: 
-  - Minimal, es solo para desarrollo
-
-**Archivos afectados**:
-- `src/main/resources/application.yml`
-- `pom.xml` (dependencia H2)
-
-**Revisión futura**:
-- Revisar si se necesita perfil de producción con PostgreSQL
-- Si el proyecto pasa a producción, implementar profile específico
+**Archivos:** `dto/request/*.java`, `dto/response/*.java`, `mapper/*.java`.
 
 ---
 
-## Decisión #2: Arquitectura de capas
+## 4. Relación `Task ↔ TaskItem` bidireccional con `CascadeType.ALL` + `orphanRemoval`
 
-**Fecha**: 2024-04-20
-**Estado**: Aceptada
+**Contexto:** los ítems no existen sin su tarea contenedora (composición, no agregación).
 
-**Contexto**: 
-Necesitaba definir la arquitectura del proyecto. Spring Boot permite muchos estilos arquitectónicos.
+**Alternativas:**
+- Bidireccional con cascade + orphanRemoval.
+- Unidireccional (Task → Items).
+- Sin relación JPA (queries manuales).
 
-**Alternativas consideradas**:
+**Decisión:** bidireccional con `CascadeType.ALL` + `orphanRemoval = true`, inicialización `@Builder.Default private List<TaskItem> items = new ArrayList<>()`.
 
-1. **Arquitectura en capas tradicional (Controller → Service → Repository → Entity)**
-   - Pros:
-     - Separación clara de responsabilidades
-     - Fácil de entender y mantener
-     - Estándar de la industria
-     - Bien soportado por Spring Boot
-   - Contras:
-     - Puede ser "overkill" para apps pequeñas
-     - Más código boilerplate
-
-2. **Clean Architecture / Hexagonal**
-   - Pros:
-     - Muy desacoplado
-     - Testeable
-     - Independiente de frameworks
-   - Contras:
-     - Más complejo para proyecto pequeño
-     - Curva de aprendizaje más alta
-     - Puede ser excesivo para el alcance
-
-3. **Controller con lógica directa (sin Service layer)**
-   - Pros:
-     - Menos código
-     - Más rápido de implementar
-   - Contras:
-     - Mezcla responsabilidades
-     - Difícil de testear
-     - No es profesional
-
-**Decisión tomada**: Arquitectura en capas tradicional
-
-**Justificación**:
-- Es el estándar esperado para APIs empresariales
-- Balance perfecto entre simplicidad y profesionalismo
-- Facilita testing (puedo testear cada capa independientemente)
-- Demuestra conocimiento de mejores prácticas
-- Es lo que esperaría ver un evaluador técnico
-
-**Estructura implementada**:
-```
-com.todoapi/
-├── controller/      # REST endpoints
-├── service/         # Lógica de negocio
-├── repository/      # Acceso a datos
-├── entity/          # Entidades JPA
-├── dto/             # Data Transfer Objects
-├── mapper/          # Entity ↔ DTO conversion
-├── exception/       # Excepciones custom
-└── handler/         # Exception handlers
-```
-
-**Rol de la IA**:
-- ✅ Consulté a IA sobre esto
-- IA recomendó arquitectura en capas para proyecto de este tamaño
-- ✅ Seguí la recomendación total
-- Es la elección correcta para el contexto
-
-**Consecuencias**:
-- **Positivas**: 
-  - Código organizado y mantenible
-  - Fácil de testear
-  - Profesional
-  - Escalable si el proyecto crece
-- **Negativas**: 
-  - Más archivos y clases
-  - Algo de boilerplate
-- **Riesgos**: 
-  - Ninguno significativo
-
-**Archivos afectados**:
-- Toda la estructura de paquetes del proyecto
-
-**Revisión futura**:
-- No necesita revisión, es apropiado para el proyecto
-
----
-
-## Decisión #3: Estrategia de DTOs
-
-**Fecha**: 2024-04-20
-**Estado**: Aceptada
-
-**Contexto**: 
-Necesitaba decidir cómo manejar los contratos de API (request/response). ¿Exponer entidades directamente o usar DTOs?
-
-**Alternativas consideradas**:
-
-1. **DTOs separados para Request y Response**
-   - Pros:
-     - Contratos de API claros y estables
-     - No expone estructura interna de BD
-     - Validaciones específicas por operación
-     - Campos computados en responses
-     - Flexibilidad para evolucionar
-   - Contras:
-     - Más código (DTOs + Mappers)
-     - Duplicación aparente de campos
-
-2. **Exponer entidades directamente**
-   - Pros:
-     - Menos código
-     - Más rápido de implementar
-   - Contras:
-     - ❌ Mala práctica
-     - Acopla API a estructura de BD
-     - Problemas con lazy loading
-     - No es profesional
-
-3. **Un solo DTO genérico**
-   - Pros:
-     - Menos clases
-   - Contras:
-     - Confuso (mezcla request/response)
-     - Validaciones complicadas
-
-**Decisión tomada**: DTOs separados para Request y Response
-
-**Estructura implementada**:
-- `CreateTaskRequest`: Para crear tareas (validaciones estrictas)
-- `UpdateTaskRequest`: Para actualizar (validaciones más flexibles)
-- `TaskResponse`: Para respuestas (incluye campos computados)
-- `TaskItemResponse`: Para items en respuestas
-- Mappers dedicados para conversión
-
-**Justificación**:
-- Es la mejor práctica establecida en la industria
-- Separa contratos de API de modelo de dominio
-- Permite evolucionar la BD sin romper la API
-- Facilita validaciones específicas por operación
-- Demuestra conocimiento de clean code
-
-**Rol de la IA**:
-- ✅ Consulté a IA sobre esto
-- IA enfatizó fuertemente no exponer entidades
-- ✅ Seguí la recomendación total
-- Es un principio fundamental de diseño de APIs
-
-**Consecuencias**:
-- **Positivas**: 
-  - API limpia y profesional
-  - Validaciones precisas
-  - Flexibilidad para cambios
-  - Fácil de documentar con Swagger
-- **Negativas**: 
-  - Más clases que mantener
-  - Necesidad de mappers
-- **Riesgos**: 
-  - Ninguno, solo beneficios
-
-**Archivos afectados**:
-- `dto/request/*`
-- `dto/response/*`
-- `mapper/*`
-
-**Revisión futura**:
-- Evaluar si necesitamos más DTOs para casos específicos
-
----
-
-## Decisión #4: Manejo de relaciones JPA
-
-**Fecha**: 2024-04-20
-**Estado**: Aceptada
-
-**Contexto**: 
-Task tiene una relación OneToMany con TaskItem. Necesitaba decidir cómo configurar esta relación en JPA.
-
-**Alternativas consideradas**:
-
-1. **Relación bidireccional con CASCADE.ALL y orphanRemoval**
-   - Pros:
-     - Manejo automático de items
-     - Eliminar tarea elimina items
-     - Código más limpio
-     - Consistencia automática
-   - Contras:
-     - Requiere métodos helper bien implementados
-     - Cuidado con lazy loading
-
-2. **Relación unidireccional simple**
-   - Pros:
-     - Más simple inicialmente
-   - Contras:
-     - Requiere manejo manual
-     - Más código en servicios
-     - Propenso a errores
-
-3. **Sin relación JPA (manejo manual con queries)**
-   - Pros:
-     - Control total
-   - Contras:
-     - Mucho código repetitivo
-     - Fácil cometer errores
-     - No aprovecha JPA
-
-**Decisión tomada**: Relación bidireccional con CASCADE.ALL y orphanRemoval
-
-**Implementación**:
+**Implementación clave:**
 ```java
-// En Task
-@OneToMany(mappedBy = "task", cascade = CascadeType.ALL, orphanRemoval = true)
-private List<TaskItem> items = new ArrayList<>();
-
-// Métodos helper
 public void addItem(TaskItem item) {
     items.add(item);
     item.setTask(this);
 }
-
 public void removeItem(TaskItem item) {
     items.remove(item);
     item.setTask(null);
 }
 ```
 
-**Justificación**:
-- Los items son dependientes de la tarea (no existen sin ella)
-- CASCADE.ALL asegura que operaciones en Task se propagan a items
-- orphanRemoval elimina items huérfanos automáticamente
-- Métodos helper mantienen consistencia bidireccional
-- Es la configuración correcta para este tipo de relación
+**Justificación:**
+- Semántica correcta: borrar tarea borra ítems; quitar un ítem del `List` lo elimina.
+- Métodos helper garantizan consistencia en ambas direcciones.
+- `FetchType.LAZY` por default evita carga innecesaria.
 
-**Rol de la IA**:
-- ✅ Consulté a IA sobre esto
-- IA recomendó exactamente esta configuración
-- ✅ Seguí la recomendación total
-- Es el patrón estándar para composición padre-hijo
+**Trampas mitigadas:**
+- `@ToString(exclude = "items")` para evitar recursión infinita.
+- `@EqualsAndHashCode(onlyExplicitlyIncluded = true)` sobre `id` para evitar N+1 en equality.
 
-**Consecuencias**:
-- **Positivas**: 
-  - Código más limpio en servicios
-  - No necesito gestionar items por separado
-  - Consistencia garantizada
-- **Negativas**: 
-  - Necesito entender bien el cascade
-  - Cuidado con N+1 queries (mitigado con fetch strategies)
-- **Riesgos**: 
-  - Mínimo, es configuración estándar
+**Rol de IA:** sugerencia estándar (Sí → seguida).
 
-**Archivos afectados**:
-- `entity/Task.java`
-- `entity/TaskItem.java`
-
-**Revisión futura**:
-- Monitorear queries para detectar N+1 problems
-- Agregar @EntityGraph si es necesario
+**Archivos:** `entity/Task.java`, `entity/TaskItem.java`.
 
 ---
 
-## Decisión #5: Estrategia de validación
+## 5. Máquina de estados sin librería: mapa inmutable en el servicio
 
-**Fecha**: 2024-04-20
-**Estado**: Aceptada
+**Contexto:** 4 estados con reglas simples.
 
-**Contexto**: 
-Necesitaba decidir dónde y cómo validar los datos de entrada.
+**Alternativas:**
+- Mapa `Map<TaskStatus, Set<TaskStatus>>` en el servicio.
+- Spring State Machine (dependencia extra).
+- Enum con método `canTransitionTo(TaskStatus)`.
 
-**Alternativas consideradas**:
+**Decisión:** mapa inmutable en `TaskServiceImpl`.
 
-1. **Spring Validation en DTOs + validaciones de negocio en Service**
-   - Pros:
-     - Separación de validaciones técnicas vs. negocio
-     - Mensajes de error automáticos
-     - Estándar de Spring Boot
-   - Contras:
-     - Dos capas de validación
-
-2. **Solo validación manual en Service**
-   - Pros:
-     - Todo en un lugar
-   - Contras:
-     - Mucho código repetitivo
-     - Errores menos consistentes
-
-3. **Solo anotaciones en entidades**
-   - Pros:
-     - Validación a nivel de BD
-   - Contras:
-     - Errores tardíos
-     - Mensajes poco claros
-
-**Decisión tomada**: Spring Validation en DTOs + validaciones de negocio en Service
-
-**Implementación**:
+**Implementación:**
 ```java
-// En DTOs
-public class CreateTaskRequest {
-    @NotBlank(message = "Title is required")
-    @Size(max = 255, message = "Title too long")
-    private String title;
-    
-    @Future(message = "Execution date must be in future")
-    private LocalDateTime executionDate;
-}
+private static final Map<TaskStatus, Set<TaskStatus>> ALLOWED_TRANSITIONS = Map.of(
+    TaskStatus.SCHEDULED,   Set.of(TaskStatus.IN_PROGRESS),
+    TaskStatus.IN_PROGRESS, Set.of(TaskStatus.COMPLETED, TaskStatus.CANCELLED),
+    TaskStatus.COMPLETED,   Set.of(),
+    TaskStatus.CANCELLED,   Set.of()
+);
+```
 
-// En Service
-public TaskResponse updateStatus(Long id, TaskStatus newStatus) {
-    Task task = findTaskOrThrow(id);
-    validateStateTransition(task.getStatus(), newStatus);
-    // ...
+**Reglas:**
+- `SCHEDULED → IN_PROGRESS`
+- `IN_PROGRESS → COMPLETED | CANCELLED`
+- Transición a mismo estado: no-op (no es error).
+- Terminal states: cualquier cambio lanza `InvalidStateTransitionException`.
+
+**Justificación:** para 4 estados la librería sería overkill. Mapa es legible, fácil de testear y mantiene toda la lógica en un lugar.
+
+**Rol de IA:** recomendación directa (Sí → seguida).
+
+**Archivos:** `service/impl/TaskServiceImpl.java`, `exception/InvalidStateTransitionException.java`.
+
+---
+
+## 6. Validación dual: `@Valid` en DTOs + reglas de negocio en servicio
+
+**Contexto:** dónde validar.
+
+**Decisión:**
+- **Formato / tipos / tamaño / nulabilidad** → anotaciones Bean Validation en DTOs.
+- **Reglas de negocio** (transiciones, existencia, unicidad) → servicio con excepciones específicas.
+
+**Ejemplo request:**
+```java
+@NotBlank(message = "Title is required")
+@Size(max = 255, message = "Title must be at most 255 characters")
+private String title;
+```
+
+**Ejemplo servicio:**
+```java
+if (!ALLOWED_TRANSITIONS.getOrDefault(current, Set.of()).contains(newStatus)) {
+    throw new InvalidStateTransitionException(current, newStatus);
 }
 ```
 
-**Justificación**:
-- Validaciones técnicas (formato, tamaño, nulls) → DTOs con anotaciones
-- Validaciones de negocio (transiciones de estado, reglas) → Service layer
-- Separación clara de responsabilidades
-- Mejores mensajes de error al usuario
+**Justificación:** separación de preocupaciones. El frontend recibe `400` con `errors[]` listando campos inválidos, pero también `400` con `message` claro cuando se rompe una regla de negocio.
 
-**Rol de la IA**:
-- ✅ Consulté a IA sobre esto
-- IA recomendó exactamente esta separación
-- ✅ Seguí la recomendación total
-- Es best practice establecida
+**Rol de IA:** (Sí → seguida).
 
-**Consecuencias**:
-- **Positivas**: 
-  - Código más limpio
-  - Errores claros y útiles
-  - Fácil de testear
-- **Negativas**: 
-  - Validación en dos lugares
-- **Riesgos**: 
-  - Ninguno
-
-**Archivos afectados**:
-- `dto/request/*`
-- `service/impl/TaskServiceImpl.java`
+**Archivos:** `dto/request/*`, `service/impl/TaskServiceImpl.java`.
 
 ---
 
-## Decisión #6: Gestión de estados de tareas
+## 7. `@ControllerAdvice` global con `ErrorResponse` consistente
 
-**Fecha**: 2024-04-20
-**Estado**: Aceptada
+**Contexto:** respuestas de error homogéneas.
 
-**Contexto**: 
-Las tareas tienen estados (SCHEDULED, IN_PROGRESS, COMPLETED, CANCELLED) y necesitaba definir las transiciones válidas.
+**Decisión:** `GlobalExceptionHandler` con `@RestControllerAdvice`, captura:
 
-**Alternativas consideradas**:
+| Excepción | HTTP | Origen |
+|---|---|---|
+| `ResourceNotFoundException` | 404 | Custom — tarea o ítem no existe |
+| `InvalidStateTransitionException` | 400 | Custom — transición de estado inválida |
+| `ValidationException` | 400 | Custom — reglas de negocio |
+| `MethodArgumentNotValidException` | 400 | Spring — `@Valid` falló |
+| `HttpMessageNotReadableException` | 400 | Spring — JSON malformado |
+| `MethodArgumentTypeMismatchException` | 400 | Spring — `?status=FOO` no parsea a enum |
+| `Exception` | 500 | Fallback con log ERROR |
 
-1. **Enum simple + validación manual de transiciones**
-   - Pros:
-     - Simple de implementar
-     - Flexible
-   - Contras:
-     - Lógica dispersa
-     - Fácil olvidar validaciones
-
-2. **State Machine (Spring State Machine)**
-   - Pros:
-     - Muy robusto
-     - Transiciones bien definidas
-   - Contras:
-     - Overkill para 4 estados
-     - Complejidad adicional
-
-3. **Enum con lógica de transición integrada**
-   - Pros:
-     - Todo en un lugar
-     - Fácil de entender
-     - No requiere librería adicional
-   - Contras:
-     - Enum con lógica (algunos prefieren evitarlo)
-
-**Decisión tomada**: Enum simple + validación en Service
-
-**Reglas implementadas**:
-- Nueva tarea → SCHEDULED
-- SCHEDULED → IN_PROGRESS ✅
-- IN_PROGRESS → COMPLETED ✅
-- IN_PROGRESS → CANCELLED ✅
-- Cualquier otra transición → InvalidStateTransitionException ❌
-
-**Código**:
-```java
-private void validateStateTransition(TaskStatus current, TaskStatus next) {
-    if (current == next) return;
-    
-    boolean isValid = switch (current) {
-        case SCHEDULED -> next == IN_PROGRESS;
-        case IN_PROGRESS -> next == COMPLETED || next == CANCELLED;
-        case COMPLETED, CANCELLED -> false;
-    };
-    
-    if (!isValid) {
-        throw new InvalidStateTransitionException(
-            "Cannot transition from " + current + " to " + next
-        );
-    }
-}
-```
-
-**Justificación**:
-- Son solo 4 estados con reglas simples
-- No justifica librería adicional
-- Lógica clara en un solo método
-- Fácil de testear
-- Mensajes de error claros
-
-**Rol de la IA**:
-- ✅ Consulté a IA sobre esto
-- IA sugirió validación en service (no state machine)
-- ✅ Seguí la recomendación
-- State machine sería sobre-ingeniería
-
-**Consecuencias**:
-- **Positivas**: 
-  - Simple y efectivo
-  - Fácil de mantener
-  - No dependencies extra
-- **Negativas**: 
-  - Tendría que refactorizar si estados crecen mucho
-- **Riesgos**: 
-  - Mínimo para este alcance
-
-**Archivos afectados**:
-- `entity/TaskStatus.java`
-- `service/impl/TaskServiceImpl.java`
-- `exception/InvalidStateTransitionException.java`
-
----
-
-## Decisión #7: Paginación y búsqueda
-
-**Fecha**: 2024-04-21
-**Estado**: Aceptada
-
-**Contexto**: 
-La prueba técnica requiere listado paginado y búsqueda de tareas.
-
-**Alternativas consideradas**:
-
-1. **Spring Data JPA Pageable + Specifications**
-   - Pros:
-     - Estándar de Spring
-     - Muy potente
-     - Fácil de usar
-   - Contras:
-     - Specifications pueden ser complejas
-
-2. **Query methods + Pageable**
-   - Pros:
-     - Simple para casos básicos
-   - Contras:
-     - Limitado para búsquedas complejas
-
-3. **Criteria API manual**
-   - Pros:
-     - Control total
-   - Contras:
-     - Mucho código boilerplate
-
-**Decisión tomada**: Query methods + Pageable para búsqueda básica
-
-**Implementación**:
-```java
-// En Repository
-Page<Task> findAll(Pageable pageable);
-
-@Query("SELECT t FROM Task t WHERE " +
-       "LOWER(t.title) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
-       "LOWER(t.description) LIKE LOWER(CONCAT('%', :search, '%'))")
-Page<Task> searchTasks(@Param("search") String search, Pageable pageable);
-
-List<Task> findByStatus(TaskStatus status);
-```
-
-**Justificación**:
-- Para este proyecto, búsqueda simple es suficiente (título + descripción)
-- Pageable de Spring es muy fácil de usar
-- No necesito filtros complejos que justifiquen Specifications
-- Puedo escalar a Specifications si es necesario después
-
-**Rol de la IA**:
-- ✅ Consulté a IA sobre esto
-- IA recomendó empezar con query methods
-- ✅ Seguí la recomendación
-- Es apropiado para el alcance
-
-**Consecuencias**:
-- **Positivas**: 
-  - Código simple
-  - Paginación funciona bien
-  - Búsqueda cubre requisitos
-- **Negativas**: 
-  - Búsqueda es básica (LIKE puede ser lenta con muchos datos)
-- **Riesgos**: 
-  - Si necesito búsquedas complejas, refactorizar a Specifications
-
-**Archivos afectados**:
-- `repository/TaskRepository.java`
-- `service/impl/TaskServiceImpl.java`
-- `controller/TaskController.java`
-
-**Revisión futura**:
-- Considerar índices en BD si el volumen de datos crece
-- Evaluar Specifications si se necesitan filtros complejos
-
----
-
-## Decisión #8: Manejo de excepciones
-
-**Fecha**: 2024-04-21
-**Estado**: Aceptada
-
-**Contexto**: 
-Necesitaba un sistema consistente de manejo de errores para la API.
-
-**Alternativas consideradas**:
-
-1. **@ControllerAdvice global + excepciones custom**
-   - Pros:
-     - Centralizado
-     - Consistente
-     - Fácil de mantener
-   - Contras:
-     - Requiere planificación inicial
-
-2. **Try-catch en cada endpoint**
-   - Pros:
-     - Control fino
-   - Contras:
-     - Código repetitivo
-     - Inconsistente
-
-3. **Solo excepciones estándar de Spring**
-   - Pros:
-     - Sin código extra
-   - Contras:
-     - Mensajes genéricos
-     - Poco control
-
-**Decisión tomada**: @ControllerAdvice global + excepciones custom
-
-**Excepciones custom creadas**:
-- `ResourceNotFoundException` → 404
-- `InvalidStateTransitionException` → 400
-- `ValidationException` → 400
-
-**ErrorResponse estándar**:
+**Estructura `ErrorResponse`:**
 ```json
 {
-  "timestamp": "2024-04-21T10:30:00",
-  "status": 404,
-  "error": "Not Found",
-  "message": "Task not found with id: 123",
-  "path": "/api/v1/tasks/123"
+  "timestamp": "2026-04-23T10:00:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Title is required",
+  "path": "/api/v1/tasks",
+  "errors": [
+    { "field": "title", "message": "Title is required" }
+  ]
 }
 ```
 
-**Justificación**:
-- Respuestas de error consistentes en toda la API
-- Fácil de documentar y entender
-- Mensajes de error claros para el cliente
-- Código DRY (no repetir try-catch)
+**Justificación:** contrato estable. Frontend puede distinguir error de campo vs. error de negocio leyendo `errors[]` vs. `message`.
 
-**Rol de la IA**:
-- ✅ Consulté a IA sobre esto
-- IA recomendó @ControllerAdvice como best practice
-- ✅ Seguí la recomendación total
-- Es el estándar de Spring Boot
+**Rol de IA:** (Sí → seguida).
 
-**Consecuencias**:
-- **Positivas**: 
-  - API profesional
-  - Errores útiles
-  - Fácil de testear
-- **Negativas**: 
-  - Algunas clases adicionales
-- **Riesgos**: 
-  - Ninguno
-
-**Archivos afectados**:
-- `exception/*`
-- `handler/GlobalExceptionHandler.java`
-- `dto/response/ErrorResponse.java`
+**Archivos:** `exception/GlobalExceptionHandler.java`, `exception/*Exception.java`, `dto/response/ErrorResponse.java`.
 
 ---
 
-## Decisión #9: Estrategia de testing
+## 8. Búsqueda con JPQL `LEFT JOIN` sobre ítems
 
-**Fecha**: 2024-04-21
-**Estado**: Aceptada
+**Contexto:** historia 7 pide que la búsqueda localice tareas por información relevante. Se decidió ampliar al texto de los ítems (un checklist útil suele describir la tarea).
 
-**Contexto**: 
-Necesitaba decidir qué tipo de tests escribir y cuánta cobertura lograr.
+**Alternativas:**
+- Búsqueda solo en `title` y `description` de Task.
+- Búsqueda en title + description + descripción de ítems.
+- Elasticsearch / full-text search.
 
-**Alternativas consideradas**:
+**Decisión:** búsqueda JPQL con `LEFT JOIN` + `SELECT DISTINCT` + filtro opcional de estado en la misma query.
 
-1. **Unit + Integration tests con >70% coverage**
-   - Pros:
-     - Cobertura completa
-     - Confianza en el código
-     - Profesional
-   - Contras:
-     - Más tiempo
+**Query final:**
+```sql
+SELECT DISTINCT t FROM Task t LEFT JOIN t.items i
+WHERE (:status IS NULL OR t.status = :status)
+  AND (
+        LOWER(t.title)       LIKE LOWER(CONCAT('%', :query, '%'))
+     OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :query, '%'))
+     OR LOWER(COALESCE(i.description, '')) LIKE LOWER(CONCAT('%', :query, '%'))
+  )
+```
 
-2. **Solo unit tests básicos**
-   - Pros:
-     - Rápido
-   - Contras:
-     - No prueba integración
+**Justificación:**
+- Una sola query, evita N+1.
+- `DISTINCT` evita duplicar la tarea cuando varios ítems matchean.
+- `:status IS NULL OR ...` permite que el mismo método sirva para búsqueda con y sin filtro de estado (API combinada).
+- `COALESCE(..., '')` cubre descripciones nulas.
 
-3. **Solo integration tests**
-   - Pros:
-     - Prueba flujos completos
-   - Contras:
-     - Más lentos
-     - No aísla problemas
+**Alternativa futura:** si el volumen crece, migrar a Hibernate Search / OpenSearch. Por ahora, LIKE es suficiente.
 
-**Decisión tomada**: Unit tests (servicios) + Integration tests (controllers) con objetivo >70%
+**Rol de IA:** diseño de la query (Sí → seguida, validada manualmente con datos de prueba).
 
-**Estrategia**:
-- Unit tests para:
-  - TaskService (mockear repository)
-  - Mappers
-  - Validaciones de negocio
-  
-- Integration tests para:
-  - Endpoints REST completos
-  - Flujos end-to-end
-  - Validaciones de API
-
-**Justificación**:
-- Combina lo mejor de ambos mundos
-- Unit tests rápidos para lógica de negocio
-- Integration tests para confianza en la API
-- 70% es un buen balance para proyecto de este tamaño
-
-**Rol de la IA**:
-- ✅ Consulté a IA sobre esto
-- IA recomendó esta combinación
-- ✅ Seguí la recomendación
-- Es best practice establecida
-
-**Consecuencias**:
-- **Positivas**: 
-  - Alta confianza en el código
-  - Detecta regresiones
-  - Documenta comportamiento esperado
-- **Negativas**: 
-  - Tiempo adicional de desarrollo
-- **Riesgos**: 
-  - Ninguno, solo beneficios
-
-**Archivos afectados**:
-- `src/test/java/**/*`
+**Archivos:** `repository/TaskRepository.java`.
 
 ---
 
-## Decisión #10: Despliegue y contenerización
+## 9. Paginación universal + tope `max-page-size`
 
-**Fecha**: 2024-04-21
-**Estado**: Propuesta
+**Contexto:** historia 5 pide listado paginado. Decidimos ir más allá y **paginar todo endpoint de colección**.
 
-**Contexto**: 
-La prueba técnica tiene como "plus opcional" Docker. Decidir si implementarlo.
+**Decisión:**
+- **Todos** los endpoints que devuelven listas retornan `PagedResponse<T>`:
+  - `GET /v1/tasks`
+  - `GET /v1/tasks?status=X`
+  - `GET /v1/tasks/search`
+  - `GET /v1/tasks/pending`
+  - `GET /v1/tasks/overdue`
+- Todos aceptan `page`, `size` y `sort` estándar de Spring Data.
+- Defaults centralizados: `size=20`, `sort=createdAt`.
+- Tope de seguridad en `application.yml`:
+  ```yaml
+  spring:
+    data:
+      web:
+        pageable:
+          default-page-size: 20
+          max-page-size: 100
+  ```
 
-**Alternativas consideradas**:
+**Justificación:**
+- Uniformidad: un cliente aprende un contrato (PagedResponse) y lo reutiliza.
+- Seguridad: evita que `size=100000` tumbe el servidor; Spring lo capa a 100.
+- Consistencia en tests e integración con frontends (tablas con paginación uniforme).
 
-1. **Implementar Docker + Docker Compose**
-   - Pros:
-     - Demuestra conocimiento adicional
-     - Facilita evaluación
-     - Punto extra
-   - Contras:
-     - Tiempo adicional
+**Rol de IA:** propuesta y refactor propagando el cambio a repo, service, controller y tests (Sí → seguida con revisión).
 
-2. **No implementar Docker**
-   - Pros:
-     - Enfoque en funcionalidad core
-   - Contras:
-     - Pierde oportunidad de punto extra
-
-3. **Docker simple (solo backend)**
-   - Pros:
-     - Balance tiempo/beneficio
-   - Contras:
-     - Menos completo
-
-**Decisión tomada**: Implementar Docker + Docker Compose (si hay tiempo)
-
-**Plan**:
-- Dockerfile multi-stage para optimizar imagen
-- docker-compose.yml para levantar todo con un comando
-- Documentar en README
-
-**Justificación**:
-- Es un plus que agrega valor
-- No es complejo de implementar
-- Demuestra conocimientos adicionales
-- Si funciona, es un diferenciador
-
-**Rol de la IA**:
-- 🕐 Aún no consultado (pendiente de implementar)
-- Consultaré para optimización de Dockerfile
-
-**Consecuencias**:
-- **Positivas**: 
-  - Punto extra en evaluación
-  - Más profesional
-- **Negativas**: 
-  - Tiempo adicional
-- **Riesgos**: 
-  - Si no hay tiempo, se puede omitir
-
-**Archivos afectados**:
-- `Dockerfile`
-- `docker-compose.yml`
-- `README.md`
-
-**Revisión futura**:
-- Implementar en Fase 9 si hay tiempo
-- De lo contrario, omitir (es opcional)
+**Archivos afectados:** `TaskRepository.java`, `TaskService.java`, `TaskServiceImpl.java`, `TaskController.java`, tests, `application.yml`.
 
 ---
 
-## Resumen de Decisiones
+## 10. Alerta de tareas overdue: headers HTTP + flag + endpoint
 
-| # | Decisión | Estado | IA Consultada | Recomendación Seguida |
-|---|----------|--------|---------------|----------------------|
-| 1 | Base de datos H2 | Aceptada | Sí | Total |
-| 2 | Arquitectura en capas | Aceptada | Sí | Total |
-| 3 | DTOs separados | Aceptada | Sí | Total |
-| 4 | Relación bidireccional JPA | Aceptada | Sí | Total |
-| 5 | Validación dual | Aceptada | Sí | Total |
-| 6 | Estados simples | Aceptada | Sí | Parcial |
-| 7 | Query methods + Pageable | Aceptada | Sí | Total |
-| 8 | @ControllerAdvice | Aceptada | Sí | Total |
-| 9 | Unit + Integration tests | Aceptada | Sí | Total |
-| 10 | Docker | Propuesta | No | - |
+**Contexto:** historia 9 — "Si una tarea está en Programado y llega su fecha, el sistema debe reflejar que existe una tarea pendiente por ejecutar".
+
+**Alternativas consideradas** (6 opciones evaluadas, ver [Prompt #18](./02-prompts.md#prompt-18--opciones-para-implementar-la-alerta)):
+1. Header HTTP `X-Overdue-Count` + `X-Overdue-Alert`.
+2. Endpoint resumen `/alerts`.
+3. Scheduler + WebSocket/SSE.
+4. Email / Slack / Teams.
+5. Push notifications móvil.
+6. Sistema de notificaciones persistido en BD.
+
+**Decisión:** implementar **1** como mecanismo transversal + mantener **flag `isOverdue` en cada response** + **endpoint dedicado `/overdue` paginado**.
+
+**Implementación (triple refuerzo):**
+
+**a) Flag en el DTO (visible en cualquier consulta o listado):**
+```java
+private boolean isOverdue(Task task) {
+    return task.getStatus() == TaskStatus.SCHEDULED
+        && task.getExecutionDate() != null
+        && task.getExecutionDate().isBefore(LocalDateTime.now());
+}
+```
+
+**b) Endpoint específico:**
+```
+GET /v1/tasks/overdue?page=0&size=10&sort=executionDate,asc
+```
+
+**c) Headers HTTP en todos los GET de `/v1/tasks/**`** (via `OverdueAlertInterceptor`):
+```
+X-Overdue-Count: 3
+X-Overdue-Alert: Tienes 3 tarea(s) programada(s) cuya fecha ya vencio y siguen sin iniciar
+```
++ CORS con `exposedHeaders` para que un frontend JS los pueda leer.
+
+**Justificación:**
+- El enunciado permite al desarrollador definir el formato. Los tres refuerzos dan visibilidad desde múltiples ángulos.
+- El flag es **observable en consulta y listado** como pide explícitamente la historia.
+- El header es la alerta "activa" — un frontend puede mostrar un badge/toast sin hacer un segundo request.
+- Sin dependencias extras (no se usó WebSocket/Firebase/SMTP para no inflar el alcance).
+
+**Rol de IA:** análisis comparativo de 6 alternativas + implementación de la opción elegida (Sí → seguida).
+
+**Archivos:**
+- `config/OverdueAlertInterceptor.java`
+- `config/WebMvcConfig.java`
+- `mapper/TaskMapper.java::isOverdue()`
+- `repository/TaskRepository.java::countOverdue()`
+- `service/impl/TaskServiceImpl.java::countOverdue()`
+- `controller/TaskController.java::overdue()`
 
 ---
 
-## Reflexión sobre el Proceso de Decisión
+## 11. Idioma único del código: inglés
 
-### Uso de IA en las decisiones
-- IA fue consultada para todas las decisiones arquitectónicas importantes
-- Las recomendaciones de IA fueron seguidas en >90% de los casos
-- Cuando no seguí completamente, fue por contexto específico del proyecto
-- IA ayudó a validar decisiones y conocer alternativas
+**Contexto:** los enums iniciales estaban en español (`PROGRAMADO`, `EN_EJECUCION`...), mezclados con nombres de variables en inglés. Decidimos homogeneizar.
 
-### Criterios de decisión principales
-1. **Simplicidad apropiada**: No sobre-ingenierizar
-2. **Profesionalismo**: Seguir industry best practices
-3. **Mantenibilidad**: Código fácil de entender y modificar
-4. **Testabilidad**: Facilitar testing
-5. **Demostración de conocimiento**: Mostrar competencias técnicas
+**Decisión:** todo el código fuente, mensajes de log, descripciones Swagger, nombres de métodos y enum values en inglés.
 
-### Lecciones aprendidas
-- Consultar IA para decisiones arquitectónicas ahorra tiempo
-- Es importante entender el "por qué" de cada recomendación
-- Balance entre simplicidad y profesionalismo es clave
-- Documentar decisiones facilita revisión y aprendizaje
+**Mapa del refactor:**
+| Antes (ES) | Después (EN) |
+|---|---|
+| `PROGRAMADO` | `SCHEDULED` |
+| `EN_EJECUCION` | `IN_PROGRESS` |
+| `FINALIZADA` | `COMPLETED` |
+| `CANCELADA` | `CANCELLED` |
+
+**Justificación:**
+- Código profesional e idiomático.
+- Consistencia con convenciones REST internacionales.
+- Evita confusión cuando un modelo es `Task` pero su estado es `PROGRAMADO`.
+- Los mensajes de usuario (ej. `X-Overdue-Alert`) sí están en español porque son user-facing.
+
+**Rol de IA:** refactor propagado a enum, service, mapper, tests, Postman y README (Sí → seguida, verificado con `grep`).
 
 ---
 
-**Última actualización**: [Fecha]
-**Total de decisiones documentadas**: 10
+## 12. Upgrade de springdoc-openapi por incompatibilidad con Spring Boot 3.5
+
+**Contexto:** al cargar Swagger UI, `GET /api/v3/api-docs` respondía HTTP 500 y la UI mostraba "Failed to load API definition".
+
+**Causa raíz:** `springdoc-openapi-starter-webmvc-ui 2.6.0` rompe en Spring Boot ≥ 3.4 por cambios internos en `RequestMappingInfoHandlerMapping`.
+
+**Decisión:** upgrade directo a `springdoc-openapi-starter-webmvc-ui 2.8.9`.
+
+**Justificación:** es la versión oficialmente compatible con Spring Boot 3.5.x.
+
+**Rol de IA:** diagnóstico + recomendación de versión (Sí → seguida).
+
+**Archivos:** `pom.xml`.
+
+---
+
+## 13. Seed reproducible para el evaluador
+
+**Contexto:** H2 en memoria se resetea en cada reinicio. Un evaluador que quiera probar manualmente no puede trabajar con la BD vacía.
+
+**Alternativas:**
+- `data.sql` nativo de Spring → aplica siempre al arrancar, menos explícito.
+- `CommandLineRunner` → código Java extra.
+- Script externo invocando la API REST.
+
+**Decisión:** script externo `docs/seed.sh` con `curl`.
+
+**Qué hace:**
+1. POST 11 tareas variadas.
+2. PATCH de estados para dejar 4 estados representados: **3 SCHEDULED, 3 IN_PROGRESS, 2 COMPLETED, 2 CANCELLED**.
+3. Incluye **1 tarea overdue real** (SCHEDULED con fecha 2026-03-10, ~44 días en el pasado).
+4. Imprime al final la distribución por estado.
+
+**Justificación:**
+- El script documenta por sí mismo cómo usar el API (es ejemplo de uso real).
+- Opcional: puede no correrse y el API sigue funcionando.
+- No contamina el código: no hay datos hardcodeados en producción.
+
+**Rol de IA:** generación del script + iteración para cubrir overdue real (Sí → seguida).
+
+**Archivos:** `docs/seed.sh`.
+
+---
+
+## 14. Docker opcional pero incluido
+
+**Contexto:** el enunciado marca Docker como "plus opcional".
+
+**Decisión:** incluido, con build multi-stage.
+
+**Archivos:**
+- `backend/Dockerfile` — multi-stage (build Maven → runtime JRE 17).
+- `backend/.dockerignore` — excluye target/, .idea, *.md, etc.
+- `docker-compose.yml` — arranca el backend publicando 8080.
+
+**Justificación:** agrega puntos sin costo significativo; facilita que el evaluador levante el proyecto con `docker compose up` si no tiene Java 17 local.
+
+**Rol de IA:** scaffold del Dockerfile optimizado (Sí → seguida).
+
+---
+
+## Resumen ejecutivo
+
+| # | Decisión | IA consultada | Seguida |
+|---|---|---|---|
+| 1 | H2 en memoria | Sí | Total |
+| 2 | Arquitectura en capas | Sí | Total |
+| 3 | DTOs separados + records | Sí | Total |
+| 4 | Relación bidireccional cascade+orphanRemoval | Sí | Total |
+| 5 | State machine vía mapa inmutable | Sí | Total |
+| 6 | Validación dual | Sí | Total |
+| 7 | `@ControllerAdvice` global | Sí | Total |
+| 8 | Búsqueda con JOIN sobre ítems | Sí | Total |
+| 9 | Paginación universal + max cap | Sí | Total |
+| 10 | Alerta overdue triple (flag + endpoint + headers) | Sí | Parcial (se eligió 1 de 6 opciones) |
+| 11 | Código en inglés | Sí | Total |
+| 12 | Upgrade springdoc 2.8.9 | Sí | Total |
+| 13 | Seed script externo | Sí | Total |
+| 14 | Docker multi-stage | Sí | Total |
+
+---
+
+## Principios guía del proyecto
+
+1. **Simplicidad apropiada** — no sobre-ingenierizar (State Machine, Hexagonal, Elasticsearch descartados).
+2. **Best practices de Spring Boot** — se cumple con lo que un revisor espera ver: `@ControllerAdvice`, DTOs, Pageable, Bean Validation.
+3. **Experiencia del evaluador** — seed reproducible, Swagger UI, colección Postman, H2 console, Docker.
+4. **Código en inglés, mensajes de usuario en español** — profesionalismo + usabilidad local.
+5. **Historia 9 como punto clave** — alerta visible por 3 mecanismos complementarios sin depender de infraestructura externa.

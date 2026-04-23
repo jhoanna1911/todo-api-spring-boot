@@ -1,0 +1,691 @@
+{
+  "info": {
+    "name": "Todo API",
+    "description": "Colección completa con validaciones end-to-end. Cada request valida status + body. Los tests confirman que los cambios se reflejan en GET /{id} y en el listado.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "b5a4c5a0-todo-api-imaginemos"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api", "type": "string" },
+    { "key": "taskId", "value": "", "type": "string" },
+    { "key": "itemId", "value": "", "type": "string" },
+    { "key": "secondItemId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "01 - Flujo Happy Path",
+      "item": [
+        {
+          "name": "1. Crear tarea con 2 items",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const b = pm.response.json();",
+              "pm.test('status SCHEDULED', () => pm.expect(b.status).to.eql('SCHEDULED'));",
+              "pm.test('2 items totales', () => pm.expect(b.itemsTotalCount).to.eql(2));",
+              "pm.collectionVariables.set('taskId', b.id);",
+              "pm.collectionVariables.set('itemId', b.items[0].id);",
+              "pm.collectionVariables.set('secondItemId', b.items[1].id);"
+            ]}
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Release v1.0\",\n  \"description\": \"Checklist inicial\",\n  \"executionDate\": \"2026-05-01T10:00:00\",\n  \"itemDescriptions\": [\"Correr tests\", \"Actualizar changelog\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Edición de campos (title, description, executionDate)",
+      "item": [
+        {
+          "name": "Editar título",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('title actualizado', () => pm.expect(pm.response.json().title).to.eql('Release v1.0 - EDITADO'));"
+            ]}
+          }],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Release v1.0 - EDITADO\"\n}" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}"] }
+          }
+        },
+        {
+          "name": "Editar descripción",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('description actualizada', () => pm.expect(pm.response.json().description).to.eql('Descripción nueva'));",
+              "pm.test('title NO cambió (patch parcial)', () => pm.expect(pm.response.json().title).to.eql('Release v1.0 - EDITADO'));"
+            ]}
+          }],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"description\": \"Descripción nueva\"\n}" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}"] }
+          }
+        },
+        {
+          "name": "Editar executionDate",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('executionDate actualizada', () => pm.expect(pm.response.json().executionDate).to.include('2026-06-15'));"
+            ]}
+          }],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"executionDate\": \"2026-06-15T09:00:00\"\n}" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}"] }
+          }
+        },
+        {
+          "name": "GET /{id} refleja TODOS los cambios",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const b = pm.response.json();",
+              "pm.test('title persistido', () => pm.expect(b.title).to.eql('Release v1.0 - EDITADO'));",
+              "pm.test('description persistida', () => pm.expect(b.description).to.eql('Descripción nueva'));",
+              "pm.test('executionDate persistida', () => pm.expect(b.executionDate).to.include('2026-06-15'));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}"] }
+          }
+        },
+        {
+          "name": "GET / (listado) refleja los cambios",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const taskId = Number(pm.collectionVariables.get('taskId'));",
+              "const found = pm.response.json().content.find(t => t.id === taskId);",
+              "pm.test('tarea presente en listado', () => pm.expect(found).to.exist);",
+              "pm.test('título editado presente en listado', () => pm.expect(found.title).to.eql('Release v1.0 - EDITADO'));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?page=0&size=50&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "page", "value": "0" }, { "key": "size", "value": "50" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Cambios de estado",
+      "item": [
+        {
+          "name": "SCHEDULED -> IN_PROGRESS",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('estado IN_PROGRESS', () => pm.expect(pm.response.json().status).to.eql('IN_PROGRESS'));"
+            ]}
+          }],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"newStatus\": \"IN_PROGRESS\" }" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}/status", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}", "status"] }
+          }
+        },
+        {
+          "name": "GET /{id} refleja status IN_PROGRESS",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('status persistido = IN_PROGRESS', () => pm.expect(pm.response.json().status).to.eql('IN_PROGRESS'));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}"] }
+          }
+        },
+        {
+          "name": "GET / (listado) refleja status IN_PROGRESS",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const id = Number(pm.collectionVariables.get('taskId'));",
+              "const found = pm.response.json().content.find(t => t.id === id);",
+              "pm.test('tarea presente en listado', () => pm.expect(found).to.exist);",
+              "pm.test('status en listado = IN_PROGRESS', () => pm.expect(found.status).to.eql('IN_PROGRESS'));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?page=0&size=50&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "page", "value": "0" }, { "key": "size", "value": "50" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Aparece en /pending (IN_PROGRESS)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const id = Number(pm.collectionVariables.get('taskId'));",
+              "pm.test('tarea presente en /pending', () => pm.expect(pm.response.json().some(t => t.id === id)).to.be.true);"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/pending", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "pending"] }
+          }
+        },
+        {
+          "name": "Transición inválida: IN_PROGRESS -> SCHEDULED (400)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+              "pm.test('mensaje transición inválida', () => pm.expect(pm.response.json().message).to.include('Invalid state transition'));"
+            ]}
+          }],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"newStatus\": \"SCHEDULED\" }" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}/status", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}", "status"] }
+          }
+        },
+        {
+          "name": "IN_PROGRESS -> COMPLETED",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('estado COMPLETED', () => pm.expect(pm.response.json().status).to.eql('COMPLETED'));"
+            ]}
+          }],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"newStatus\": \"COMPLETED\" }" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}/status", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}", "status"] }
+          }
+        },
+        {
+          "name": "GET /{id} refleja status COMPLETED",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('status persistido = COMPLETED', () => pm.expect(pm.response.json().status).to.eql('COMPLETED'));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}"] }
+          }
+        },
+        {
+          "name": "GET / (listado) refleja status COMPLETED",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const id = Number(pm.collectionVariables.get('taskId'));",
+              "const found = pm.response.json().content.find(t => t.id === id);",
+              "pm.test('status en listado = COMPLETED', () => pm.expect(found.status).to.eql('COMPLETED'));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?page=0&size=50&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "page", "value": "0" }, { "key": "size", "value": "50" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Transición inválida desde estado terminal: COMPLETED -> IN_PROGRESS (400)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+              "pm.test('mensaje transición inválida', () => pm.expect(pm.response.json().message).to.include('Invalid state transition'));"
+            ]}
+          }],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"newStatus\": \"IN_PROGRESS\" }" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}/status", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}", "status"] }
+          }
+        },
+        {
+          "name": "YA NO aparece en /pending",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const id = Number(pm.collectionVariables.get('taskId'));",
+              "pm.test('tarea NO está en /pending', () => pm.expect(pm.response.json().some(t => t.id === id)).to.be.false);"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/pending", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "pending"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - CRUD de items",
+      "description": "Flujo completo de items: agregar, editar descripción, togglear completado, eliminar. Cada paso verifica reflexión en GET /{id}.",
+      "item": [
+        {
+          "name": "Agregar item nuevo (POST /items)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const b = pm.response.json();",
+              "pm.test('ahora hay 3 items', () => pm.expect(b.itemsTotalCount).to.eql(3));",
+              "const nuevo = b.items.find(i => i.description === 'Item agregado por PATCH');",
+              "pm.test('item aparece con la descripción enviada', () => pm.expect(nuevo).to.exist);",
+              "pm.collectionVariables.set('newItemId', nuevo.id);"
+            ]}
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"description\": \"Item agregado por PATCH\"\n}" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}/items", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}", "items"] }
+          }
+        },
+        {
+          "name": "Editar descripción de item (PUT /items/{id})",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const id = Number(pm.collectionVariables.get('itemId'));",
+              "const item = pm.response.json().items.find(i => i.id === id);",
+              "pm.test('descripción actualizada', () => pm.expect(item.description).to.eql('Correr tests - EDITADO'));"
+            ]}
+          }],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"description\": \"Correr tests - EDITADO\"\n}" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}/items/{{itemId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}", "items", "{{itemId}}"] }
+          }
+        },
+        {
+          "name": "Marcar item como completado (PATCH /items/{id})",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const b = pm.response.json();",
+              "pm.test('1 item completado', () => pm.expect(b.itemsCompletedCount).to.eql(1));",
+              "const id = Number(pm.collectionVariables.get('itemId'));",
+              "const item = b.items.find(i => i.id === id);",
+              "pm.test('el item correcto está completed=true', () => pm.expect(item.completed).to.be.true);"
+            ]}
+          }],
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}/items/{{itemId}}?completed=true", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}", "items", "{{itemId}}"], "query": [{ "key": "completed", "value": "true" }] }
+          }
+        },
+        {
+          "name": "Eliminar item (DELETE /items/{id})",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const b = pm.response.json();",
+              "pm.test('quedan 2 items', () => pm.expect(b.itemsTotalCount).to.eql(2));",
+              "const deletedId = Number(pm.collectionVariables.get('secondItemId'));",
+              "pm.test('item borrado ya no está', () => pm.expect(b.items.some(i => i.id === deletedId)).to.be.false);"
+            ]}
+          }],
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}/items/{{secondItemId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}", "items", "{{secondItemId}}"] }
+          }
+        },
+        {
+          "name": "GET /{id} refleja cambios en items",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const b = pm.response.json();",
+              "pm.test('itemsTotalCount = 2 (después de add + delete)', () => pm.expect(b.itemsTotalCount).to.eql(2));",
+              "pm.test('itemsCompletedCount = 1', () => pm.expect(b.itemsCompletedCount).to.eql(1));",
+              "const editado = b.items.find(i => i.description === 'Correr tests - EDITADO');",
+              "pm.test('descripción editada persiste', () => pm.expect(editado).to.exist);"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Listado, búsqueda y consultas especiales",
+      "item": [
+        {
+          "name": "Listar paginado",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Buscar por texto (título)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('devuelve PagedResponse', () => pm.expect(pm.response.json()).to.have.property('totalElements'));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/search?query=release&page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "search"], "query": [{ "key": "query", "value": "release" }, { "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Buscar por texto (descripción de tarea)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('al menos 1 resultado', () => pm.expect(pm.response.json().totalElements).to.be.greaterThan(0));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/search?query=staging&page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "search"], "query": [{ "key": "query", "value": "staging" }, { "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Buscar por texto (descripción de ITEM)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('encuentra tarea por item (Stripe)', () => pm.expect(pm.response.json().totalElements).to.be.greaterThan(0));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/search?query=stripe&page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "search"], "query": [{ "key": "query", "value": "stripe" }, { "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Buscar combinado: texto + status",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const items = pm.response.json().content;",
+              "pm.test('todos los resultados son IN_PROGRESS', () => items.forEach(t => pm.expect(t.status).to.eql('IN_PROGRESS')));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/search?query=stripe&status=IN_PROGRESS&page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "search"], "query": [{ "key": "query", "value": "stripe" }, { "key": "status", "value": "IN_PROGRESS" }, { "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Search con paginación (size=2)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const b = pm.response.json();",
+              "pm.test('pageSize=2', () => pm.expect(b.pageSize).to.eql(2));",
+              "pm.test('content tiene a lo sumo 2 elementos', () => pm.expect(b.content.length).to.be.at.most(2));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/search?query=&page=0&size=2&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "search"], "query": [{ "key": "query", "value": "" }, { "key": "page", "value": "0" }, { "key": "size", "value": "2" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Filtrar por estado: SCHEDULED",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const items = pm.response.json().content;",
+              "pm.test('solo devuelve SCHEDULED', () => items.forEach(t => pm.expect(t.status).to.eql('SCHEDULED')));",
+              "console.log('SCHEDULED totalElements=' + pm.response.json().totalElements);"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?status=SCHEDULED&page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "status", "value": "SCHEDULED" }, { "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Filtrar por estado: IN_PROGRESS",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const items = pm.response.json().content;",
+              "pm.test('solo devuelve IN_PROGRESS', () => items.forEach(t => pm.expect(t.status).to.eql('IN_PROGRESS')));",
+              "console.log('IN_PROGRESS totalElements=' + pm.response.json().totalElements);"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?status=IN_PROGRESS&page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "status", "value": "IN_PROGRESS" }, { "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Filtrar por estado: COMPLETED",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const items = pm.response.json().content;",
+              "pm.test('solo devuelve COMPLETED', () => items.forEach(t => pm.expect(t.status).to.eql('COMPLETED')));",
+              "console.log('COMPLETED totalElements=' + pm.response.json().totalElements);"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?status=COMPLETED&page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "status", "value": "COMPLETED" }, { "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Filtrar por estado: CANCELLED",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const items = pm.response.json().content;",
+              "pm.test('solo devuelve CANCELLED', () => items.forEach(t => pm.expect(t.status).to.eql('CANCELLED')));",
+              "console.log('CANCELLED totalElements=' + pm.response.json().totalElements);"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?status=CANCELLED&page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "status", "value": "CANCELLED" }, { "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Filtrar por estado paginado (SCHEDULED, size=1)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const b = pm.response.json();",
+              "pm.test('pageSize=1', () => pm.expect(b.pageSize).to.eql(1));",
+              "pm.test('content tiene 1 elemento', () => pm.expect(b.content.length).to.eql(1));",
+              "pm.test('totalPages > 1 (hay varias SCHEDULED)', () => pm.expect(b.totalPages).to.be.greaterThan(1));",
+              "pm.test('isFirst=true', () => pm.expect(b.isFirst).to.be.true);"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?status=SCHEDULED&page=0&size=1&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "status", "value": "SCHEDULED" }, { "key": "page", "value": "0" }, { "key": "size", "value": "1" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "Filtrar por estado: INVALID (400)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks?status=FOO&page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"], "query": [{ "key": "status", "value": "FOO" }, { "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "/pending (paginado)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const b = pm.response.json();",
+              "pm.test('es PagedResponse', () => pm.expect(b).to.have.property('totalElements'));",
+              "pm.test('solo SCHEDULED o IN_PROGRESS', () => b.content.forEach(t => pm.expect(['SCHEDULED','IN_PROGRESS']).to.include(t.status)));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/pending?page=0&size=10&sort=createdAt,desc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "pending"], "query": [{ "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "createdAt,desc" }] }
+          }
+        },
+        {
+          "name": "/overdue (paginado)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const b = pm.response.json();",
+              "pm.test('es PagedResponse', () => pm.expect(b).to.have.property('totalElements'));",
+              "pm.test('solo tareas con isOverdue=true', () => b.content.forEach(t => pm.expect(t.isOverdue).to.be.true));"
+            ]}
+          }],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/overdue?page=0&size=10&sort=executionDate,asc", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "overdue"], "query": [{ "key": "page", "value": "0" }, { "key": "size", "value": "10" }, { "key": "sort", "value": "executionDate,asc" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - Casos de error",
+      "item": [
+        {
+          "name": "400 - Validación (título vacío)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));",
+              "pm.test('errors[] contiene field=title', () => pm.expect(pm.response.json().errors.some(e => e.field === 'title')).to.be.true);"
+            ]}
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"description\": \"Sin título\" }" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks", "host": ["{{baseUrl}}"], "path": ["v1", "tasks"] }
+          }
+        },
+        {
+          "name": "404 - Tarea inexistente",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('404', () => pm.response.to.have.status(404));"
+            ]}
+          }],
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/v1/tasks/999999", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "999999"] } }
+        },
+        {
+          "name": "400 - Transición inválida",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "type": "text/javascript", "exec": [
+                "const base = pm.collectionVariables.get('baseUrl');",
+                "pm.sendRequest({ url: base + '/v1/tasks', method: 'POST', header: { 'Content-Type': 'application/json' }, body: { mode: 'raw', raw: JSON.stringify({ title: 'Error 400 test' }) } }, (e, r) => {",
+                "  const id = r.json().id; pm.collectionVariables.set('tempTaskId', id);",
+                "  pm.sendRequest({ url: base + '/v1/tasks/' + id + '/status', method: 'PATCH', header: { 'Content-Type': 'application/json' }, body: { mode: 'raw', raw: JSON.stringify({ newStatus: 'IN_PROGRESS' }) } }, () => {",
+                "    pm.sendRequest({ url: base + '/v1/tasks/' + id + '/status', method: 'PATCH', header: { 'Content-Type': 'application/json' }, body: { mode: 'raw', raw: JSON.stringify({ newStatus: 'COMPLETED' }) } }, () => {});",
+                "  });",
+                "});"
+              ]}
+            },
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('400', () => pm.response.to.have.status(400));",
+                "pm.test('mensaje transición inválida', () => pm.expect(pm.response.json().message).to.include('Invalid state transition'));"
+              ]}
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{ \"newStatus\": \"IN_PROGRESS\" }" },
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{tempTaskId}}/status", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{tempTaskId}}", "status"] }
+          }
+        },
+        {
+          "name": "404 - Item que no existe",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('404', () => pm.response.to.have.status(404));"
+            ]}
+          }],
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}/items/999999", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}", "items", "999999"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 - Limpieza",
+      "item": [
+        {
+          "name": "Eliminar tarea (cleanup)",
+          "event": [{
+            "listen": "test",
+            "script": { "type": "text/javascript", "exec": [
+              "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+            ]}
+          }],
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/v1/tasks/{{taskId}}", "host": ["{{baseUrl}}"], "path": ["v1", "tasks", "{{taskId}}"] }
+          }
+        }
+      ]
+    }
+  ]
+}
